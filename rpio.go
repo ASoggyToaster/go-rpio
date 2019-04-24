@@ -1,3 +1,5 @@
+//+build linux
+
 /*
 Package rpio provides GPIO access on the Raspberry PI without any need
 for external c libraries (eg. WiringPi or BCM2835).
@@ -64,11 +66,14 @@ https://www.raspberrypi.org/documentation/hardware/raspberrypi/bcm2835/BCM2835-A
 and https://elinux.org/BCM2835_datasheet_errata - for errors in that spec
 
 */
+
 package rpio
 
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"runtime"
 	"os"
 	"reflect"
 	"sync"
@@ -630,6 +635,9 @@ func backupIRQs() {
 func Open() (err error) {
 	var file *os.File
 
+	if sys.GOARCH == "arm" {
+		return errors.New("Invalid arch")
+	}
 	// Open fd for rw mem access; try dev/mem first (need root)
 	file, err = os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
 	if os.IsPermission(err) { // try gpiomem otherwise (some extra functions like clock and pwm setting wont work)
@@ -680,22 +688,25 @@ func Open() (err error) {
 }
 
 func memMap(fd uintptr, base int64) (mem []uint32, mem8 []byte, err error) {
-	mem8, err = syscall.Mmap(
-		int(fd),
-		base,
-		memLength,
-		syscall.PROT_READ|syscall.PROT_WRITE,
-		syscall.MAP_SHARED,
-	)
-	if err != nil {
+
+	if runtime.GOARCH == "arm" {
+		mem8, err = syscall.Mmap(
+			int(fd),
+			base,
+			memLength,
+			syscall.PROT_READ|syscall.PROT_WRITE,
+			syscall.MAP_SHARED,
+		)
+		if err != nil {
+			return
+		}
+		// Convert mapped byte memory to unsafe []uint32 pointer, adjust length as needed
+		header := *(*reflect.SliceHeader)(unsafe.Pointer(&mem8))
+		header.Len /= (32 / 8) // (32 bit = 4 bytes)
+		header.Cap /= (32 / 8)
+		mem = *(*[]uint32)(unsafe.Pointer(&header))
 		return
 	}
-	// Convert mapped byte memory to unsafe []uint32 pointer, adjust length as needed
-	header := *(*reflect.SliceHeader)(unsafe.Pointer(&mem8))
-	header.Len /= (32 / 8) // (32 bit = 4 bytes)
-	header.Cap /= (32 / 8)
-	mem = *(*[]uint32)(unsafe.Pointer(&header))
-	return
 }
 
 // Close unmaps GPIO memory
