@@ -76,6 +76,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"reflect"
+	"unsafe"
 )
 
 type Mode uint8
